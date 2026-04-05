@@ -122,9 +122,11 @@ func Test_FloatRange(t *testing.T) {
 // are ~4× slower than modern dev hardware for append-heavy loops, and
 // Test_ProgressGuard_Infinity materializes ~80 MB of float64), while
 // still being short enough that a real regression (a truly infinite
-// loop) surfaces within one CI run. 30s gives ~50× headroom over the
-// observed local runtime of <1s.
-const progressGuardTimeout = 30 * time.Second
+// loop) surfaces within one CI run before the leaked goroutine (see
+// runWithTimeout) saturates a CPU core and destabilises the rest of
+// the suite. 10s is ~10× headroom over the observed local runtime of
+// <1s and matches the fail-fast preference.
+const progressGuardTimeout = 10 * time.Second
 
 // runWithTimeout runs fn and fails the test if it does not complete
 // within d. Used to lock in DoS guards — if a guard regresses, the
@@ -175,7 +177,15 @@ func Test_ProgressGuard_NegativeInfinity(t *testing.T) {
 	runWithTimeout(t, progressGuardTimeout, func() {
 		// Forward range with +inf end, -inf start.
 		got := num.NewNumberRange(math.Inf(1), num.StartAt(math.Inf(-1)))
-		_ = got // Just verify it returns within timeout.
+		// A subtly broken implementation could return nil (bypassing
+		// the non-nil contract) or a slice longer than the documented
+		// cap. Lock both properties in, not just termination.
+		if got == nil {
+			t.Error("Expected non-nil slice for range [-Inf, +Inf), got nil")
+		}
+		if len(got) == 0 || len(got) > num.MaxElements {
+			t.Errorf("Expected 1..MaxElements entries for [-Inf, +Inf), got len=%d", len(got))
+		}
 	})
 }
 
@@ -208,8 +218,18 @@ func Test_ProgressGuard_NaN(t *testing.T) {
 func Test_ProgressGuard_PrecisionExhaustion(t *testing.T) {
 	runWithTimeout(t, progressGuardTimeout, func() {
 		// 1e20 is well above 2^53, so 1e20 + 1 == 1e20 in float64.
+		// The correct behavior is well-defined: the guard fires after
+		// the first append, producing a single-element slice (the
+		// starting value). A subtly broken implementation might fall
+		// through to the iteration cap and return 10M copies of 1e20,
+		// so assert the bounded-length contract explicitly.
 		got := num.NewNumberRange(1e20+10, num.StartAt(1e20), num.StepBy(1.0))
-		_ = got // Just verify it returns within timeout.
+		if got == nil {
+			t.Error("Expected non-nil slice for precision-exhausted range, got nil")
+		}
+		if len(got) > 1 {
+			t.Errorf("Expected at most 1 element for precision-exhausted range, got len=%d", len(got))
+		}
 	})
 }
 
@@ -290,6 +310,27 @@ func Test_NegativeStepCoercedToAbs(t *testing.T) {
 	if !reflect.DeepEqual(gotBack, wantBack) {
 		t.Errorf("backward range with negative step: expected %v, got %v", wantBack, gotBack)
 	}
+}
+
+// Test_MinIntStepNegationSurvives locks in the documented behavior
+// for the one case where -step cannot be represented in T: the
+// signed minimum. For int8(-128), -(-128) == -128 (two's complement
+// wrap), so after the negative-step coercion in NewNumberRange the
+// step is still negative. The per-iteration progress guard must
+// catch this and terminate the loop rather than running to the
+// iteration cap.
+func Test_MinIntStepNegationSurvives(t *testing.T) {
+	runWithTimeout(t, progressGuardTimeout, func() {
+		got := num.NewNumberRange[int8](10, num.StepBy[int8](math.MinInt8))
+		// The exact result depends on guard ordering; what matters is
+		// that the call returns promptly with a bounded, non-nil slice.
+		if got == nil {
+			t.Error("Expected non-nil slice for MinInt8 step, got nil")
+		}
+		if len(got) > num.MaxElements {
+			t.Errorf("Expected bounded slice for MinInt8 step, got len=%d", len(got))
+		}
+	})
 }
 
 // Test_EmptyPathsAreNonNil is the regression for review item #5.

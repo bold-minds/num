@@ -32,7 +32,8 @@ import "math"
 // rather than running to float64 precision exhaustion or OOM.
 //
 // Callers who need to distinguish natural termination from cap
-// truncation can pre-check their bounds:
+// truncation can pre-check their bounds. The snippet below assumes
+// signed integers with end > start; the exact pre-check depends on T:
 //
 //	want := uint64(end-start) / uint64(step)
 //	if want > num.MaxElements {
@@ -140,7 +141,11 @@ func estimateCapacity[T Numeric](start, end, step T) int {
 	if est < 1 {
 		return 0
 	}
-	return int(est)
+	// est has been bounded to [1, MaxElements] above, so int(est) is
+	// safe on both 32-bit and 64-bit int. gosec G115 flags float→int
+	// conversions unconditionally; the annotation is preemptive for
+	// CI that adopts gosec later.
+	return int(est) //nolint:gosec // bounded by MaxElements, fits int32
 }
 
 // generateForwardRange walks start → end with +step. The loop is
@@ -175,6 +180,11 @@ func generateForwardRange[T Numeric](start, end, step T, inclusive bool) []T {
 		if i == end {
 			// Inclusive terminal reached. Stop before computing
 			// i + step — on T's maximum value that step would wrap.
+			// Structurally only reachable in the inclusive path
+			// (non-inclusive already broke above on !(i < end)); the
+			// check stays unconditional for symmetry with backward
+			// and because an integer compare per iteration is
+			// negligible against the append.
 			break
 		}
 		next := i + step
@@ -222,7 +232,12 @@ func generateBackwardRange[T Numeric](start, end, step T, inclusive bool) []T {
 	return result
 }
 
-// RangeOption configures range generation.
+// RangeOption configures range generation. The configuration
+// receiver is intentionally unexported, which means RangeOption
+// values can only be constructed by the helpers in this package
+// (StartAt, StepBy, Inclusive). External packages cannot implement
+// their own options; the option set is closed. Request new options
+// via issues on the repository.
 type RangeOption[T Numeric] func(*rangeConfig[T])
 
 type rangeConfig[T Numeric] struct {
@@ -234,6 +249,10 @@ type rangeConfig[T Numeric] struct {
 // Inclusive returns a RangeOption that includes the end value.
 //
 //	NewNumberRange(5, Inclusive[int]()) // [0,1,2,3,4,5]
+//
+// Caveat: when start == end, NewNumberRange returns an empty slice
+// even with Inclusive — the option has no effect on that boundary
+// case. Callers who want [start] for that case must special-case it.
 func Inclusive[T Numeric]() RangeOption[T] {
 	return func(cfg *rangeConfig[T]) {
 		cfg.inclusive = true

@@ -58,13 +58,16 @@ func Benchmark_NewNumberRange_Float(b *testing.B) {
 }
 
 // Benchmark_NewNumberRange_GuardFastPath exercises a degenerate
-// float input whose progress guard fires on the first iteration
-// (step = +Inf, so next == i). If the guard ever regresses into a
-// slow fallback, this benchmark's ns/op moves from a handful of
-// nanoseconds to something much larger.
+// float input whose progress guard fires on the first iteration:
+// start = 1e20 is well above 2^53 so 1e20 + 1 == 1e20 in float64,
+// and the forward guard !(next > i) trips after exactly one append.
+// The +Inf end keeps estimateCapacity at 0 (non-finite diff) so the
+// benchmark measures the guard-firing hot path, not an 80 MB
+// capacity preallocation. If the guard ever regresses into a slow
+// fallback, this benchmark's ns/op and allocs/op both balloon.
 func Benchmark_NewNumberRange_GuardFastPath(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = num.NewNumberRange(10.0, num.StepBy(math.Inf(1)))
+		_ = num.NewNumberRange(math.Inf(1), num.StartAt(1e20), num.StepBy(1.0))
 	}
 }
