@@ -116,6 +116,16 @@ func Test_FloatRange(t *testing.T) {
 	}
 }
 
+// progressGuardTimeout is the deadline for the ProgressGuard regression
+// tests. It has to be loose enough to absorb the 10M-iteration cap
+// path on the slowest supported runner (GitHub Actions shared runners
+// are ~4× slower than modern dev hardware for append-heavy loops, and
+// Test_ProgressGuard_Infinity materializes ~80 MB of float64), while
+// still being short enough that a real regression (a truly infinite
+// loop) surfaces within one CI run. 30s gives ~50× headroom over the
+// observed local runtime of <1s.
+const progressGuardTimeout = 30 * time.Second
+
 // runWithTimeout runs fn and fails the test if it does not complete
 // within d. Used to lock in DoS guards — if a guard regresses, the
 // test times out rather than hanging the whole suite.
@@ -138,9 +148,9 @@ func runWithTimeout(t *testing.T, d time.Duration, fn func()) {
 // guard, NewNumberRange(math.Inf(1)) enters a forward loop where
 // i += 1 makes steady progress until i reaches 2^53, at which point
 // float64 precision exhaustion pins i but the i < +Inf bound check
-// stays true forever. The guard detects that next == i and breaks.
+// stays true forever. The iteration cap bails after 10M loops.
 func Test_ProgressGuard_Infinity(t *testing.T) {
-	runWithTimeout(t, 2*time.Second, func() {
+	runWithTimeout(t, progressGuardTimeout, func() {
 		got := num.NewNumberRange(math.Inf(1))
 		// The exact count is implementation-defined; we only care
 		// that the function terminates and returns a bounded result.
@@ -153,7 +163,7 @@ func Test_ProgressGuard_Infinity(t *testing.T) {
 // Test_ProgressGuard_NegativeInfinity mirrors the above for the
 // backward direction — start = -Inf should terminate cleanly.
 func Test_ProgressGuard_NegativeInfinity(t *testing.T) {
-	runWithTimeout(t, 2*time.Second, func() {
+	runWithTimeout(t, progressGuardTimeout, func() {
 		// Forward range with +inf end, -inf start.
 		got := num.NewNumberRange(math.Inf(1), num.StartAt(math.Inf(-1)))
 		_ = got // Just verify it returns within timeout.
@@ -166,13 +176,13 @@ func Test_ProgressGuard_NegativeInfinity(t *testing.T) {
 // backward path — the progress guard then catches the degenerate
 // step and bails immediately.
 func Test_ProgressGuard_NaN(t *testing.T) {
-	runWithTimeout(t, 2*time.Second, func() {
+	runWithTimeout(t, progressGuardTimeout, func() {
 		got := num.NewNumberRange(math.NaN())
 		if len(got) != 0 {
 			t.Errorf("Expected empty result for NaN end, got %v", got)
 		}
 	})
-	runWithTimeout(t, 2*time.Second, func() {
+	runWithTimeout(t, progressGuardTimeout, func() {
 		got := num.NewNumberRange(10.0, num.StepBy(math.NaN()))
 		if len(got) != 0 {
 			t.Errorf("Expected empty result for NaN step, got %v", got)
@@ -185,7 +195,7 @@ func Test_ProgressGuard_NaN(t *testing.T) {
 // float64 precision to represent the increment. The guard detects
 // next == i and bails.
 func Test_ProgressGuard_PrecisionExhaustion(t *testing.T) {
-	runWithTimeout(t, 2*time.Second, func() {
+	runWithTimeout(t, progressGuardTimeout, func() {
 		// 1e20 is well above 2^53, so 1e20 + 1 == 1e20 in float64.
 		got := num.NewNumberRange(1e20+10, num.StartAt(1e20), num.StepBy(1.0))
 		_ = got // Just verify it returns within timeout.
