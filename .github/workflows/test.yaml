@@ -1,0 +1,53 @@
+name: tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Install dependencies
+        run: go mod download
+
+      # Build validation (cross-platform).
+      # Conditionally diffs go.sum only if present — pure-stdlib children have none.
+      - name: Build validation
+        shell: bash
+        run: |
+          go build ./...
+          go mod tidy
+          git diff --exit-code go.mod
+          if [ -f go.sum ]; then
+            git diff --exit-code go.sum
+          fi
+
+      - name: Run tests (Unix)
+        if: runner.os != 'Windows'
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        run: go test -v -coverprofile="coverage.out" ./...
+
+      - name: Run benchmarks
+        run: go test -bench=. -benchmem ./...
