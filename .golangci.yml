@@ -15,11 +15,33 @@ linters:
   settings:
     depguard:
       rules:
+        # Production code: stdlib only, zero external dependencies.
         main:
           files:
             - $all
+            - "!$test"
           allow:
             - $gostd
+        # Test code: stdlib plus the package under test. Black-box
+        # `num_test` tests import github.com/bold-minds/num via its
+        # public import path, which depguard otherwise rejects.
+        tests:
+          files:
+            - $test
+          allow:
+            - $gostd
+            - github.com/bold-minds/num
+    staticcheck:
+      # QF1001 wants De Morgan's law applied to the continuation
+      # predicates in generateForwardRange / generateBackwardRange
+      # (e.g. `if !(i <= end)` → `if i > end`). That rewrite is
+      # INCORRECT for floating-point NaN: every comparison with NaN
+      # is false, so `!(i <= NaN)` is true (terminates the loop)
+      # while `i > NaN` is false (loop continues). The NaN-safety
+      # contract of NewNumberRange relies on the `!(...)` form.
+      checks:
+        - all
+        - -QF1001
     errcheck:
       check-type-assertions: true
     govet:
