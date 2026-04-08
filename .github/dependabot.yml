@@ -1,6 +1,5 @@
 version: 2
 updates:
-  # Enable version updates for Go modules
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
@@ -9,8 +8,6 @@ updates:
       time: "09:00"
       timezone: "America/Los_Angeles"
     open-pull-requests-limit: 5
-    reviewers:
-      - "bold-minds"
     assignees:
       - "bold-minds"
     commit-message:
@@ -19,7 +16,6 @@ updates:
     labels:
       - "dependencies"
       - "go"
-    # Group minor and patch updates together
     groups:
       go-dependencies:
         patterns:
@@ -28,7 +24,6 @@ updates:
           - "minor"
           - "patch"
 
-  # Enable security updates for GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -36,9 +31,7 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "America/Los_Angeles"
-    open-pull-requests-limit: 3
-    reviewers:
-      - "bold-minds"
+    open-pull-requests-limit: 5
     assignees:
       - "bold-minds"
     commit-message:
