@@ -11,6 +11,8 @@
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
+# Badge files are now committed to main branch for direct access
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
